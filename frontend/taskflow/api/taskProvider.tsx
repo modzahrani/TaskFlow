@@ -24,20 +24,20 @@ export interface Task {
 
 export interface CreateTaskData {
   title: string;
-  description?: string;
+  description?: string | null;
   status: TaskStatus;
   priority: TaskPriority;
   team_id?: string | null;
-  due_date?: string;
+  due_date?: string | null;
   assigned_to?: string | null;
 }
 
 export interface UpdateTaskData {
   title?: string;
-  description?: string;
+  description?: string | null;
   status?: TaskStatus;
   priority?: TaskPriority;
-  due_date?: string;
+  due_date?: string | null;
   assigned_to?: string | null;
 }
 
