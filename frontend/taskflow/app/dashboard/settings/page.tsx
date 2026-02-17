@@ -34,40 +34,55 @@ export default function SettingsPage() {
 
   useEffect(() => {
     async function loadSettings(): Promise<void> {
-      try {
-        const [userRes, teamsRes, invitesRes] = await Promise.all([getCurrentUser(), getTeams(), getMyPendingInvites()])
-        const loaded = userRes.data?.user || userRes.data || null
+      const [userResult, teamsResult, invitesResult] = await Promise.allSettled([
+        getCurrentUser(),
+        getTeams(),
+        getMyPendingInvites(),
+      ])
+
+      if (userResult.status === "fulfilled") {
+        const loaded = userResult.value.data?.user || userResult.value.data || null
         setUser(loaded)
         setNameDraft(loaded?.name || "")
+      } else {
+        console.error("Error loading settings user:", userResult.reason)
+      }
 
-        if (Array.isArray(teamsRes.data)) {
-          setTeams(teamsRes.data)
-          if (teamsRes.data[0]?.id) setSelectedTeamId(teamsRes.data[0].id)
-        } else if (Array.isArray(teamsRes.data?.teams)) {
-          setTeams(teamsRes.data.teams)
-          if (teamsRes.data.teams[0]?.id) setSelectedTeamId(teamsRes.data.teams[0].id)
+      if (teamsResult.status === "fulfilled") {
+        if (Array.isArray(teamsResult.value.data)) {
+          setTeams(teamsResult.value.data)
+          if (teamsResult.value.data[0]?.id) setSelectedTeamId(teamsResult.value.data[0].id)
+        } else if (Array.isArray(teamsResult.value.data?.teams)) {
+          setTeams(teamsResult.value.data.teams)
+          if (teamsResult.value.data.teams[0]?.id) setSelectedTeamId(teamsResult.value.data.teams[0].id)
         } else {
           setTeams([])
         }
+      } else {
+        console.error("Error loading settings teams:", teamsResult.reason)
+        setTeams([])
+      }
 
-        if (Array.isArray(invitesRes.data?.invites)) {
-          setPendingInvites(invitesRes.data.invites)
-        } else if (Array.isArray(invitesRes.data)) {
-          setPendingInvites(invitesRes.data)
+      if (invitesResult.status === "fulfilled") {
+        if (Array.isArray(invitesResult.value.data?.invites)) {
+          setPendingInvites(invitesResult.value.data.invites)
+        } else if (Array.isArray(invitesResult.value.data)) {
+          setPendingInvites(invitesResult.value.data)
         } else {
           setPendingInvites([])
         }
-
-        const notif = localStorage.getItem("settings.notifications")
-        const compact = localStorage.getItem("settings.compactMode")
-
-        if (notif !== null) setNotificationsEnabled(notif === "true")
-        if (compact !== null) setCompactMode(compact === "true")
-      } catch (error) {
-        console.error("Error loading settings:", error)
-      } finally {
-        setLoading(false)
+      } else {
+        console.error("Error loading settings invites:", invitesResult.reason)
+        setPendingInvites([])
       }
+
+      const notif = localStorage.getItem("settings.notifications")
+      const compact = localStorage.getItem("settings.compactMode")
+
+      if (notif !== null) setNotificationsEnabled(notif === "true")
+      if (compact !== null) setCompactMode(compact === "true")
+
+      setLoading(false)
     }
 
     void loadSettings()
