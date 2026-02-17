@@ -163,9 +163,9 @@ export default function SettingsPage() {
 
     try {
       setAddingByTeam((prev) => ({ ...prev, [teamId]: true }))
-      await addTeamMember(teamId, { email, role })
+      const response = await addTeamMember(teamId, { email, role })
       setNewMemberEmailByTeam((prev) => ({ ...prev, [teamId]: "" }))
-      alert("Invite sent successfully")
+      alert(response.data?.detail || "Invite created successfully")
     } catch (error) {
       const message = axios.isAxiosError(error)
         ? (error.response?.data?.detail as string) || error.message
