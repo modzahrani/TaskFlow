@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, Header, Query, Response, 
 import os
 import asyncpg
 import re
+import time
 from db import get_db
 from auth import verify_token
 from models.models import (
@@ -32,11 +33,86 @@ supabase = create_client(
 
 router = APIRouter()
 ACCESS_TOKEN_COOKIE = os.getenv("ACCESS_TOKEN_COOKIE", "access_token")
-COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").lower() in {"1", "true", "yes", "on"}
-COOKIE_SAMESITE = os.getenv("COOKIE_SAMESITE", "lax")
+APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
+COOKIE_SECURE = os.getenv("COOKIE_SECURE", "true" if APP_ENV == "production" else "false").lower() in {"1", "true", "yes", "on"}
+COOKIE_SAMESITE = os.getenv("COOKIE_SAMESITE", "none" if APP_ENV == "production" else "lax")
 COOKIE_DOMAIN = os.getenv("COOKIE_DOMAIN")
 
 PASSWORD_PATTERN = re.compile(r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,}$")
+EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+AUTH_WINDOW_SECONDS = int(os.getenv("AUTH_WINDOW_SECONDS", "60"))
+LOGIN_RATE_LIMIT = int(os.getenv("LOGIN_RATE_LIMIT", "10"))
+REGISTER_RATE_LIMIT = int(os.getenv("REGISTER_RATE_LIMIT", "6"))
+FORGOT_PASSWORD_RATE_LIMIT = int(os.getenv("FORGOT_PASSWORD_RATE_LIMIT", "5"))
+INVITE_RATE_LIMIT = int(os.getenv("INVITE_RATE_LIMIT", "20"))
+MAX_LOGIN_FAILURES = int(os.getenv("MAX_LOGIN_FAILURES", "5"))
+LOGIN_LOCKOUT_SECONDS = int(os.getenv("LOGIN_LOCKOUT_SECONDS", "300"))
+
+_rate_limit_buckets: dict[str, list[float]] = {}
+_login_failures: dict[str, list[float]] = {}
+_login_lockouts: dict[str, float] = {}
+
+
+def get_client_ip(x_forwarded_for: str | None) -> str:
+    if not x_forwarded_for:
+        return "unknown"
+    return x_forwarded_for.split(",")[0].strip() or "unknown"
+
+
+def normalize_email(value: str) -> str:
+    email = value.strip().lower()
+    if not email or not EMAIL_PATTERN.match(email):
+        raise HTTPException(status_code=400, detail="Invalid email address")
+    return email
+
+
+def normalize_name(value: str, field_name: str = "Name") -> str:
+    normalized = re.sub(r"\s+", " ", value.strip())
+    if not normalized:
+        raise HTTPException(status_code=400, detail=f"{field_name} cannot be empty")
+    if len(normalized) > 120:
+        raise HTTPException(status_code=400, detail=f"{field_name} is too long")
+    return normalized
+
+
+def enforce_rate_limit(key: str, limit: int, window_seconds: int, message: str) -> None:
+    now = time.time()
+    bucket = _rate_limit_buckets.get(key, [])
+    bucket = [timestamp for timestamp in bucket if now - timestamp < window_seconds]
+    if len(bucket) >= limit:
+        raise HTTPException(status_code=429, detail=message)
+    bucket.append(now)
+    _rate_limit_buckets[key] = bucket
+
+
+def enforce_login_lockout(identity_key: str) -> None:
+    now = time.time()
+    locked_until = _login_lockouts.get(identity_key)
+    if locked_until and now < locked_until:
+        remaining = int(locked_until - now)
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many failed login attempts. Try again in {remaining} seconds.",
+        )
+    if locked_until and now >= locked_until:
+        _login_lockouts.pop(identity_key, None)
+
+
+def record_login_failure(identity_key: str) -> None:
+    now = time.time()
+    attempts = _login_failures.get(identity_key, [])
+    attempts = [timestamp for timestamp in attempts if now - timestamp < AUTH_WINDOW_SECONDS]
+    attempts.append(now)
+    _login_failures[identity_key] = attempts
+    if len(attempts) >= MAX_LOGIN_FAILURES:
+        _login_lockouts[identity_key] = now + LOGIN_LOCKOUT_SECONDS
+        _login_failures.pop(identity_key, None)
+
+
+def clear_login_failures(identity_key: str) -> None:
+    _login_failures.pop(identity_key, None)
+    _login_lockouts.pop(identity_key, None)
 
 def validate_password_strength(password: str) -> None:
     if not PASSWORD_PATTERN.match(password):
@@ -93,6 +169,11 @@ async def get_tasks_for_user(
 @router.post("/tasks")
 async def create_task(task: TaskCreate, user_id: str = Depends(verify_token)):
     db = await get_db()
+    title = normalize_name(task.title, field_name="Title")
+    description = None
+    if task.description is not None:
+        cleaned_description = task.description.strip()
+        description = cleaned_description if cleaned_description else None
 
     # Check if the user is a member of the team
     is_member = await db.fetchval("""
@@ -126,8 +207,8 @@ async def create_task(task: TaskCreate, user_id: str = Depends(verify_token)):
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING *
     """,
-        task.title,
-        task.description,
+        title,
+        description,
         task.status.value,
         task.priority.value,
         task.team_id,
@@ -174,10 +255,11 @@ async def update_task(task_id: str, task: TaskUpdate, user_id: str = Depends(ver
     args = []
 
     if "title" in provided_fields:
-        args.append(task.title)
+        args.append(normalize_name(task.title or "", field_name="Title") if task.title is not None else None)
         set_clauses.append(f"title = ${len(args)}")
     if "description" in provided_fields:
-        args.append(task.description)
+        cleaned_description = task.description.strip() if task.description is not None else None
+        args.append(cleaned_description if cleaned_description else None)
         set_clauses.append(f"description = ${len(args)}")
     if "status" in provided_fields:
         args.append(task.status.value if task.status else None)
@@ -326,6 +408,9 @@ async def create_task_comment(task_id: str, payload: CommentCreate, user_id: str
     if not content:
         await db.close()
         raise HTTPException(status_code=400, detail="Comment content cannot be empty")
+    if len(content) > 5000:
+        await db.close()
+        raise HTTPException(status_code=400, detail="Comment is too long")
 
     has_access = await db.fetchval("""
         SELECT EXISTS (
@@ -425,6 +510,12 @@ async def get_team_members(team_id: str, user_id: str = Depends(verify_token)):
 @router.post("/teams/{team_id}/members")
 async def add_team_member(team_id: str, member: TeamMemberCreate,
                           user_id: str = Depends(verify_token)):
+    enforce_rate_limit(
+        key=f"invite:{user_id}",
+        limit=INVITE_RATE_LIMIT,
+        window_seconds=AUTH_WINDOW_SECONDS,
+        message="Too many invites in a short period. Please wait and try again.",
+    )
     db = await get_db()
 
     admin_check = await db.fetchrow("""
@@ -440,7 +531,7 @@ async def add_team_member(team_id: str, member: TeamMemberCreate,
         )
 
     target_user_id = member.user_id
-    normalized_email = member.email.strip().lower() if member.email else None
+    normalized_email = normalize_email(member.email) if member.email else None
     invite_email_sent = False
 
     if target_user_id is None and normalized_email:
@@ -684,13 +775,14 @@ async def remove_team_member(team_id: str, member_id: str,
 async def create_team(team: TeamCreate, user_id: str = Depends(verify_token)):
     """Create a new team and add the creator as admin"""
     db = await get_db()
+    team_name = normalize_name(team.name, field_name="Team name")
 
     try:
         team = await db.fetchrow("""
             INSERT INTO teams (name,owner_id)
             VALUES ($1,$2)
             RETURNING *
-        """, team.name,user_id)
+        """, team_name, user_id)
 
         await db.fetchrow("""
             INSERT INTO team_members (user_id, team_id, role)
@@ -791,7 +883,7 @@ async def update_team(team_id: str, team: TeamCreate,
         SET name = $1
         WHERE id = $2
         RETURNING *
-    """, team.name, team_id)
+    """, normalize_name(team.name, field_name="Team name"), team_id)
 
     await db.close()
 
@@ -858,10 +950,7 @@ async def get_current_user(user_id: str = Depends(verify_token)):
 async def update_user_profile(payload: UserProfileUpdateRequest, user_id: str = Depends(verify_token)):
     db = await get_db()
 
-    new_name = payload.name.strip()
-    if not new_name:
-        await db.close()
-        raise HTTPException(status_code=400, detail="Name cannot be empty")
+    new_name = normalize_name(payload.name)
 
     user = await db.fetchrow("""
         UPDATE users
@@ -881,16 +970,26 @@ async def update_user_profile(payload: UserProfileUpdateRequest, user_id: str = 
 # ========================= AUTH =========================
 
 @router.post("/register")
-async def create_user(user: UserCreate):
+async def create_user(user: UserCreate, x_forwarded_for: str | None = Header(default=None)):
+    client_ip = get_client_ip(x_forwarded_for)
+    enforce_rate_limit(
+        key=f"register:{client_ip}",
+        limit=REGISTER_RATE_LIMIT,
+        window_seconds=AUTH_WINDOW_SECONDS,
+        message="Too many registration attempts. Please try again later.",
+    )
+
+    email = normalize_email(user.email)
+    name = normalize_name(user.name)
     validate_password_strength(user.password)
 
     try:
         auth_user = supabase.auth.sign_up({
-            "email": user.email,
+            "email": email,
             "password": user.password,
             "options": {
                 "data": {
-                    "name": user.name
+                    "name": name
                 }
             }
         })
@@ -908,7 +1007,7 @@ async def create_user(user: UserCreate):
                 email = EXCLUDED.email,
                 name = EXCLUDED.name
             RETURNING *
-        """, user_id, user.email, user.name)
+        """, user_id, email, name)
 
         await db.close()
 
@@ -928,9 +1027,7 @@ async def create_user(user: UserCreate):
 
 @router.get("/check-email")
 async def check_email_exists(email: str = Query(..., min_length=3)):
-    normalized_email = email.strip().lower()
-    if not normalized_email:
-        raise HTTPException(status_code=400, detail="Email is required")
+    normalized_email = normalize_email(email)
 
     db = await get_db()
     exists = await db.fetchval("""
@@ -946,31 +1043,53 @@ async def check_email_exists(email: str = Query(..., min_length=3)):
 
 
 @router.post("/login")
-async def login_user(user: UserLogin, response: Response):
+async def login_user(
+    user: UserLogin,
+    response: Response,
+    x_forwarded_for: str | None = Header(default=None),
+):
+    client_ip = get_client_ip(x_forwarded_for)
+    enforce_rate_limit(
+        key=f"login:{client_ip}",
+        limit=LOGIN_RATE_LIMIT,
+        window_seconds=AUTH_WINDOW_SECONDS,
+        message="Too many login requests. Please slow down and try again.",
+    )
+
+    email = normalize_email(user.email)
+    login_identity_key = f"{email}:{client_ip}"
+    enforce_login_lockout(login_identity_key)
+
     try:
         auth_response = supabase.auth.sign_in_with_password({
-            "email": user.email,
+            "email": email,
             "password": user.password
         })
     except Exception as e:
         error_message = str(e).lower()
         if "email not confirmed" in error_message:
+            record_login_failure(login_identity_key)
             raise HTTPException(
                 status_code=403,
                 detail="Email not confirmed. Please confirm your email before login."
             )
         if "invalid login credentials" in error_message:
+            record_login_failure(login_identity_key)
             raise HTTPException(status_code=401, detail="Invalid email or password")
         raise HTTPException(status_code=500, detail="Login failed")
     
     if auth_response.user is None or auth_response.session is None:
+        record_login_failure(login_identity_key)
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     if not getattr(auth_response.user, "email_confirmed_at", None):
+        record_login_failure(login_identity_key)
         raise HTTPException(
             status_code=403,
             detail="Email not confirmed. Please confirm your email before login."
         )
+
+    clear_login_failures(login_identity_key)
     
     response.set_cookie(
         key=ACCESS_TOKEN_COOKIE,
@@ -990,13 +1109,25 @@ async def login_user(user: UserLogin, response: Response):
 
 
 @router.post("/forgot-password")
-async def forgot_password(payload: ForgotPasswordRequest):
+async def forgot_password(
+    payload: ForgotPasswordRequest,
+    x_forwarded_for: str | None = Header(default=None),
+):
+    client_ip = get_client_ip(x_forwarded_for)
+    enforce_rate_limit(
+        key=f"forgot-password:{client_ip}",
+        limit=FORGOT_PASSWORD_RATE_LIMIT,
+        window_seconds=AUTH_WINDOW_SECONDS,
+        message="Too many password reset attempts. Please try again later.",
+    )
+
+    email = normalize_email(payload.email)
     redirect_to = f"{os.getenv('FRONTEND_URL', 'http://localhost:3000')}/reset-password"
     try:
         if hasattr(supabase.auth, "reset_password_for_email"):
-            supabase.auth.reset_password_for_email(payload.email, {"redirect_to": redirect_to})
+            supabase.auth.reset_password_for_email(email, {"redirect_to": redirect_to})
         else:
-            supabase.auth.reset_password_email(payload.email)
+            supabase.auth.reset_password_email(email)
     except Exception:
         raise HTTPException(status_code=500, detail="Failed to send reset email")
 
@@ -1032,12 +1163,24 @@ async def reset_password(
 
 
 @router.post("/resend-confirmation")
-async def resend_confirmation(payload: ResendConfirmationRequest):
+async def resend_confirmation(
+    payload: ResendConfirmationRequest,
+    x_forwarded_for: str | None = Header(default=None),
+):
+    client_ip = get_client_ip(x_forwarded_for)
+    enforce_rate_limit(
+        key=f"resend-confirmation:{client_ip}",
+        limit=FORGOT_PASSWORD_RATE_LIMIT,
+        window_seconds=AUTH_WINDOW_SECONDS,
+        message="Too many confirmation requests. Please try again later.",
+    )
+
+    email = normalize_email(payload.email)
     try:
         if hasattr(supabase.auth, "resend"):
             supabase.auth.resend({
                 "type": "signup",
-                "email": payload.email
+                "email": email
             })
         else:
             raise HTTPException(status_code=501, detail="Resend confirmation is not supported by current auth client.")

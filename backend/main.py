@@ -18,10 +18,14 @@ def _parse_bool(value: str, default: bool) -> bool:
 
 
 def _parse_allowed_origins() -> list[str]:
+    app_env = os.getenv("APP_ENV", "development").strip().lower()
     raw = os.getenv("ALLOWED_ORIGINS", "")
     origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
     if origins:
         return origins
+    if app_env == "production":
+        # Force explicit origin configuration in production.
+        return []
     return ["http://localhost:3000", "http://127.0.0.1:3000"]
 
 

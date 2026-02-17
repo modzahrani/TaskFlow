@@ -237,7 +237,6 @@ export default function SettingsPage() {
     } catch (error) {
       console.error("Logout API failed, continuing local logout:", error)
     } finally {
-      localStorage.removeItem("authToken")
       localStorage.removeItem("user")
       setLoggingOut(false)
       router.push("/login")
