@@ -2,8 +2,6 @@ from fastapi import APIRouter, HTTPException, Depends, Header, Query, Response, 
 import os
 import asyncpg
 import re
-import smtplib
-from email.message import EmailMessage
 from db import get_db
 from auth import verify_token
 from models.models import (
@@ -39,44 +37,6 @@ COOKIE_SAMESITE = os.getenv("COOKIE_SAMESITE", "lax")
 COOKIE_DOMAIN = os.getenv("COOKIE_DOMAIN")
 
 PASSWORD_PATTERN = re.compile(r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,}$")
-
-
-def send_team_invite_email(
-    to_email: str,
-    inviter_name: str,
-    team_name: str,
-) -> None:
-    smtp_host = os.getenv("SMTP_HOST")
-    smtp_port = os.getenv("SMTP_PORT")
-    smtp_user = os.getenv("SMTP_USER")
-    smtp_password = os.getenv("SMTP_PASSWORD")
-    smtp_from = os.getenv("SMTP_FROM")
-    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
-    use_tls = os.getenv("SMTP_USE_TLS", "true").strip().lower() in {"1", "true", "yes", "on"}
-
-    if not smtp_host or not smtp_port or not smtp_user or not smtp_password or not smtp_from:
-        # Email sending is optional; in-app invite is still created.
-        return
-
-    message = EmailMessage()
-    message["Subject"] = f"You were invited to join {team_name} on Taskflow"
-    message["From"] = smtp_from
-    message["To"] = to_email
-    message.set_content(
-        (
-            f"Hello,\n\n"
-            f"{inviter_name} invited you to join the team \"{team_name}\" on Taskflow.\n"
-            f"Open Taskflow to accept or decline the invite from Settings.\n\n"
-            f"{frontend_url}/dashboard/settings\n\n"
-            f"If you did not expect this invite, you can ignore this email."
-        )
-    )
-
-    with smtplib.SMTP(smtp_host, int(smtp_port), timeout=20) as smtp:
-        if use_tls:
-            smtp.starttls()
-        smtp.login(smtp_user, smtp_password)
-        smtp.send_message(message)
 
 def validate_password_strength(password: str) -> None:
     if not PASSWORD_PATTERN.match(password):
@@ -480,13 +440,56 @@ async def add_team_member(team_id: str, member: TeamMemberCreate,
         )
 
     target_user_id = member.user_id
+    normalized_email = member.email.strip().lower() if member.email else None
+    invite_email_sent = False
 
-    if target_user_id is None and member.email:
-        target_user_id = await db.fetchval("""
-            SELECT id
+    if target_user_id is None and normalized_email:
+        target_user = await db.fetchrow("""
+            SELECT id, email, name
             FROM users
-            WHERE LOWER(email) = LOWER($1)
-        """, member.email.strip())
+            WHERE LOWER(email) = $1
+        """, normalized_email)
+        if target_user:
+            target_user_id = target_user["id"]
+        else:
+            redirect_to = f"{os.getenv('FRONTEND_URL', 'http://localhost:3000')}/login"
+            try:
+                invite_response = supabase.auth.admin.invite_user_by_email(
+                    normalized_email,
+                    {"redirect_to": redirect_to},
+                )
+                invited_user = getattr(invite_response, "user", None)
+                if invited_user is None:
+                    await db.close()
+                    raise HTTPException(status_code=500, detail="Failed to send invite email")
+
+                invited_name = (normalized_email.split("@")[0] or "User").replace(".", " ").replace("_", " ").strip().title()
+                created_user = await db.fetchrow("""
+                    INSERT INTO users (id, email, name)
+                    VALUES ($1, $2, $3)
+                    ON CONFLICT (id) DO UPDATE SET
+                        email = EXCLUDED.email
+                    RETURNING id
+                """, invited_user.id, normalized_email, invited_name or "User")
+                target_user_id = created_user["id"]
+                invite_email_sent = True
+            except HTTPException:
+                raise
+            except Exception as e:
+                error_message = str(e).lower()
+                if "already registered" in error_message:
+                    existing_user_id = await db.fetchval("""
+                        SELECT id
+                        FROM users
+                        WHERE LOWER(email) = $1
+                    """, normalized_email)
+                    if not existing_user_id:
+                        await db.close()
+                        raise HTTPException(status_code=404, detail="User exists in auth but not in app users table")
+                    target_user_id = existing_user_id
+                else:
+                    await db.close()
+                    raise HTTPException(status_code=500, detail="Failed to invite user by email")
 
     if target_user_id is None:
         await db.close()
@@ -546,29 +549,11 @@ async def add_team_member(team_id: str, member: TeamMemberCreate,
         await db.close()
         raise HTTPException(status_code=500, detail="Invites table is missing. Restart backend to initialize schema.")
 
-    inviter_name = await db.fetchval("""
-        SELECT name
-        FROM users
-        WHERE id = $1
-    """, user_id) or "A teammate"
-    team_name = await db.fetchval("""
-        SELECT name
-        FROM teams
-        WHERE id = $1
-    """, team_id) or "your team"
-
     await db.close()
-
-    try:
-        send_team_invite_email(
-            to_email=target_user["email"],
-            inviter_name=inviter_name,
-            team_name=team_name,
-        )
-    except Exception as email_error:
-        print(f"Invite email send failed: {email_error}")
-
-    return {"invite": row, "detail": "Invite sent. User must accept before joining the team."}
+    detail = "Invite created. User must accept before joining the team."
+    if invite_email_sent:
+        detail = "Invite email sent. User must accept before joining the team."
+    return {"invite": row, "detail": detail}
 
 
 @router.get("/users/me/team-invites")
