@@ -160,8 +160,16 @@ export default function LoginPage() {
         </div>
       </div>
 
-      <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-slate-900 to-slate-700 p-12 flex-col justify-between text-white">
-        <h2 className="text-4xl font-bold leading-tight">taskflow</h2>
+      <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700 p-12 items-center justify-center text-white">
+        <div className="text-center">
+          <span className="inline-flex rounded-full border border-white/25 bg-white/10 px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] text-white/85">
+            Task Management
+          </span>
+          <h2 className="mt-5 text-5xl font-extrabold leading-tight tracking-tight">Taskflow</h2>
+          <p className="mx-auto mt-4 max-w-md text-base text-white/80">
+            Plan clearly. Move faster.
+          </p>
+        </div>
       </div>
     </div>
   )

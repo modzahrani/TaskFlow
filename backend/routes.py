@@ -882,6 +882,25 @@ async def create_user(user: UserCreate):
         raise HTTPException(status_code=500, detail="Registration failed")
 
 
+@router.get("/check-email")
+async def check_email_exists(email: str = Query(..., min_length=3)):
+    normalized_email = email.strip().lower()
+    if not normalized_email:
+        raise HTTPException(status_code=400, detail="Email is required")
+
+    db = await get_db()
+    exists = await db.fetchval("""
+        SELECT EXISTS (
+            SELECT 1
+            FROM users
+            WHERE LOWER(email) = $1
+        )
+    """, normalized_email)
+    await db.close()
+
+    return {"available": not exists}
+
+
 @router.post("/login")
 async def login_user(user: UserLogin, response: Response):
     auth_response = supabase.auth.sign_in_with_password({

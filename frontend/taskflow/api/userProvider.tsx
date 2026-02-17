@@ -81,6 +81,13 @@ export const resendConfirmation = async (payload: ForgotPasswordData) => {
   return res;
 };
 
+export const checkEmailAvailability = async (email: string) => {
+  const res = await apiClient.get(ENDPOINTS.AUTH.CHECK_EMAIL, {
+    params: { email },
+  });
+  return res;
+};
+
 // ==================== USER OPERATIONS ====================
 
 // Get current user profile
