@@ -146,7 +146,7 @@ export default function TasksPage() {
         ...task,
         created_at: formatDateTime(task.created_at),
         due_date: formatDueDate(task.due_date),
-        created_by_name: task.created_by_name || task.created_by,
+        created_by_name: task.created_by_name || "Unknown user",
         team_name: task.team_name || task.team_id,
         assigned_to_name:
           task.assigned_to_name ||
@@ -248,7 +248,7 @@ export default function TasksPage() {
             ...createdTask,
             created_at: formatDateTime(createdTask.created_at),
             due_date: formatDueDate(createdTask.due_date),
-            created_by_name: createdTask.created_by_name || createdTask.created_by,
+            created_by_name: createdTask.created_by_name || "You",
             team_name:
               createdTask.team_name ||
               teams.find((team) => team.id === createdTask.team_id)?.name ||

@@ -72,10 +72,6 @@ export const columns: ColumnDef<Task>[] = [
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuLabel>Actions</DropdownMenuLabel>
-            <DropdownMenuItem onClick={() => navigator.clipboard.writeText(task.id)}>
-              Copy task ID
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
             <DropdownMenuItem
               onClick={() => meta?.onDeleteTask?.(task.id)}
               className="text-red-600"
@@ -206,7 +202,7 @@ export const columns: ColumnDef<Task>[] = [
   {
     accessorKey: "created_by_name",
     header: "Created By",
-    cell: ({ row }) => row.original.created_by_name || row.original.created_by,
+    cell: ({ row }) => row.original.created_by_name || "Unknown user",
   },
   {
     accessorKey: "created_at",
