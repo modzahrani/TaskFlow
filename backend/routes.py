@@ -971,14 +971,6 @@ async def update_user_profile(payload: UserProfileUpdateRequest, user_id: str = 
 
 @router.post("/register")
 async def create_user(user: UserCreate, x_forwarded_for: str | None = Header(default=None)):
-    client_ip = get_client_ip(x_forwarded_for)
-    enforce_rate_limit(
-        key=f"register:{client_ip}",
-        limit=REGISTER_RATE_LIMIT,
-        window_seconds=AUTH_WINDOW_SECONDS,
-        message="Too many registration attempts. Please try again later.",
-    )
-
     email = normalize_email(user.email)
     name = normalize_name(user.name)
     validate_password_strength(user.password)
