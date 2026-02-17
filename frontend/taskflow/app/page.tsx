@@ -1,11 +1,5 @@
-import Sidebar from "@/components/sidebar";
-import {ModeToggle} from "@/components/ThemeToggler";
-export default function Home() {
-  return (
-   <div>
+import { redirect } from "next/navigation";
 
-   <ModeToggle/>
-   </div>
-    
-  );
+export default function Home() {
+  redirect("/login");
 }
