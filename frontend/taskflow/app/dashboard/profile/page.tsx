@@ -36,37 +36,47 @@ export default function ProfilePage() {
 
   useEffect(() => {
     async function loadData(): Promise<void> {
-      try {
-        const [userRes, tasksRes, teamsRes] = await Promise.all([
-          getCurrentUser(),
-          getTasks({ limit: 100, offset: 0 }),
-          getTeams(),
-        ])
+      const [userResult, tasksResult, teamsResult] = await Promise.allSettled([
+        getCurrentUser(),
+        getTasks({ limit: 100, offset: 0 }),
+        getTeams(),
+      ])
 
-        const loadedUser: User | null = userRes.data?.user || userRes.data || null
+      if (userResult.status === "fulfilled") {
+        const loadedUser: User | null = userResult.value.data?.user || userResult.value.data || null
         setUser(loadedUser)
         setNameDraft(loadedUser?.name || "")
+      } else {
+        console.error("Error loading profile user:", userResult.reason)
+      }
 
-        if (Array.isArray(tasksRes.data)) {
-          setTasks(tasksRes.data)
-        } else if (Array.isArray(tasksRes.data?.tasks)) {
-          setTasks(tasksRes.data.tasks)
+      if (tasksResult.status === "fulfilled") {
+        if (Array.isArray(tasksResult.value.data)) {
+          setTasks(tasksResult.value.data)
+        } else if (Array.isArray(tasksResult.value.data?.tasks)) {
+          setTasks(tasksResult.value.data.tasks)
         } else {
           setTasks([])
         }
+      } else {
+        console.error("Error loading profile tasks:", tasksResult.reason)
+        setTasks([])
+      }
 
-        if (Array.isArray(teamsRes.data)) {
-          setTeamCount(teamsRes.data.length)
-        } else if (Array.isArray(teamsRes.data?.teams)) {
-          setTeamCount(teamsRes.data.teams.length)
+      if (teamsResult.status === "fulfilled") {
+        if (Array.isArray(teamsResult.value.data)) {
+          setTeamCount(teamsResult.value.data.length)
+        } else if (Array.isArray(teamsResult.value.data?.teams)) {
+          setTeamCount(teamsResult.value.data.teams.length)
         } else {
           setTeamCount(0)
         }
-      } catch (error) {
-        console.error("Error loading profile data:", error)
-      } finally {
-        setLoading(false)
+      } else {
+        console.error("Error loading profile teams:", teamsResult.reason)
+        setTeamCount(0)
       }
+
+      setLoading(false)
     }
 
     void loadData()
