@@ -1018,10 +1018,18 @@ async def create_user(user: UserCreate, x_forwarded_for: str | None = Header(def
             "detail": "Registration successful. Check your email to confirm your account."
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
-        if "already registered" in str(e).lower():
+        error_message = str(e).lower()
+        if "already registered" in error_message or "user already registered" in error_message:
             raise HTTPException(status_code=409, detail="Email already exists")
+        if "rate limit" in error_message:
+            raise HTTPException(status_code=429, detail="Too many registration attempts. Please try again later.")
+        if "invalid email" in error_message:
+            raise HTTPException(status_code=400, detail="Invalid email address")
 
+        print(f"Register error: {e}")
         raise HTTPException(status_code=500, detail="Registration failed")
 
 
