@@ -801,13 +801,7 @@ async def create_team(team: TeamCreate, user_id: str = Depends(verify_token)):
 
     except Exception as e:
         await db.close()
-
-        if "duplicate" in str(e).lower():
-            raise HTTPException(
-                status_code=409,
-                detail="Team name already exists"
-            )
-
+        print(f"Create team error: {e}")
         raise HTTPException(status_code=500, detail="Failed to create team")
 
 
@@ -1017,7 +1011,10 @@ async def create_user(user: UserCreate, x_forwarded_for: str | None = Header(def
         if "already registered" in error_message or "user already registered" in error_message:
             raise HTTPException(status_code=409, detail="Email already exists")
         if "rate limit" in error_message:
-            raise HTTPException(status_code=429, detail="Too many registration attempts. Please try again later.")
+            raise HTTPException(
+                status_code=429,
+                detail="Signup is temporarily rate-limited by Supabase. Please wait and try again.",
+            )
         if "invalid email" in error_message:
             raise HTTPException(status_code=400, detail="Invalid email address")
 

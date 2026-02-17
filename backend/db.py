@@ -11,6 +11,48 @@ async def get_db():
 async def init_db():
     db = await get_db()
     try:
+        # Legacy schema fix: allow duplicate team names by removing unique
+        # constraints/indexes that enforce uniqueness on teams.name.
+        await db.execute("""
+            DO $$
+            DECLARE
+                name_attnum SMALLINT;
+                rec RECORD;
+            BEGIN
+                SELECT a.attnum
+                INTO name_attnum
+                FROM pg_attribute a
+                WHERE a.attrelid = 'teams'::regclass
+                  AND a.attname = 'name'
+                  AND a.attnum > 0
+                  AND NOT a.attisdropped;
+
+                IF name_attnum IS NOT NULL THEN
+                    FOR rec IN
+                        SELECT c.conname
+                        FROM pg_constraint c
+                        WHERE c.conrelid = 'teams'::regclass
+                          AND c.contype = 'u'
+                          AND c.conkey = ARRAY[name_attnum]
+                    LOOP
+                        EXECUTE format('ALTER TABLE teams DROP CONSTRAINT %I', rec.conname);
+                    END LOOP;
+
+                    FOR rec IN
+                        SELECT i.relname AS index_name
+                        FROM pg_index ix
+                        JOIN pg_class i ON i.oid = ix.indexrelid
+                        JOIN pg_class t ON t.oid = ix.indrelid
+                        WHERE t.oid = 'teams'::regclass
+                          AND ix.indisunique
+                          AND ix.indkey = ARRAY[name_attnum]::int2vector
+                    LOOP
+                        EXECUTE format('DROP INDEX IF EXISTS %I', rec.index_name);
+                    END LOOP;
+                END IF;
+            END $$;
+        """)
+
         await db.execute("""
             CREATE TABLE IF NOT EXISTS task_comments (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
