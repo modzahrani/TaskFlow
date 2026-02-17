@@ -147,7 +147,7 @@ export default function TasksPage() {
         created_at: formatDateTime(task.created_at),
         due_date: formatDueDate(task.due_date),
         created_by_name: task.created_by_name || "Unknown user",
-        team_name: task.team_name || task.team_id,
+        team_name: task.team_name || "Personal",
         assigned_to_name:
           task.assigned_to_name ||
           task.assigned_to ||
@@ -180,9 +180,6 @@ export default function TasksPage() {
 
       setTeams(allTeams)
 
-      if (allTeams.length > 0) {
-        setTaskFormData((prev) => ({ ...prev, team_id: allTeams[0].id }))
-      }
     } catch (error) {
       console.error("Error fetching teams:", error)
       setTeams([])
@@ -218,11 +215,6 @@ export default function TasksPage() {
       alert("Priority is required")
       return
     }
-    if (!taskFormData.team_id) {
-      alert("Team is required")
-      return
-    }
-
     try {
       const response = await createTask({
         title: taskFormData.title.trim(),
@@ -230,7 +222,7 @@ export default function TasksPage() {
         status: taskFormData.status,
         priority: taskFormData.priority,
         due_date: taskFormData.due_date || null,
-        team_id: taskFormData.team_id,
+        team_id: taskFormData.team_id || null,
       })
       const createdTask: Task | undefined =
         response.data?.task || (response.data as Task | undefined)
@@ -252,7 +244,7 @@ export default function TasksPage() {
             team_name:
               createdTask.team_name ||
               teams.find((team) => team.id === createdTask.team_id)?.name ||
-              createdTask.team_id,
+              "Personal",
             assigned_to_name: createdTask.assigned_to_name || createdTask.assigned_to || null,
           },
           ...prev,
@@ -267,7 +259,7 @@ export default function TasksPage() {
         status: "",
         priority: "",
         due_date: "",
-        team_id: teams[0]?.id || "",
+        team_id: "",
       })
 
       setShowCreateTaskModal(false)
@@ -566,7 +558,7 @@ export default function TasksPage() {
                 </div>
 
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-foreground">Team</label>
+                  <label className="mb-1 block text-sm font-medium text-foreground">Team (optional)</label>
                   <select
                     className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                     value={taskFormData.team_id}
@@ -574,6 +566,7 @@ export default function TasksPage() {
                       setTaskFormData({ ...taskFormData, team_id: e.target.value })
                     }
                   >
+                    <option value="">Personal (no team)</option>
                     {teams.map((team) => (
                       <option key={team.id} value={team.id}>
                         {team.name}

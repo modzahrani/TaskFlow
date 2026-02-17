@@ -138,9 +138,10 @@ async def get_tasks_for_user(
     total = await db.fetchval("""
         SELECT COUNT(*)
         FROM tasks t
-        WHERE t.team_id IN (
-            SELECT team_id FROM team_members WHERE user_id = $1
-        )
+        WHERE t.created_by = $1
+           OR t.team_id IN (
+                SELECT team_id FROM team_members WHERE user_id = $1
+           )
     """, user_id)
 
     rows = await db.fetch("""
@@ -154,9 +155,10 @@ async def get_tasks_for_user(
         LEFT JOIN teams te ON te.id = t.team_id
         LEFT JOIN team_members atm ON atm.id = t.assigned_to
         LEFT JOIN users au ON au.id = atm.user_id
-        WHERE t.team_id IN (
-            SELECT team_id FROM team_members WHERE user_id = $1
-        )
+        WHERE t.created_by = $1
+           OR t.team_id IN (
+                SELECT team_id FROM team_members WHERE user_id = $1
+           )
         ORDER BY t.created_at DESC
         LIMIT $2
         OFFSET $3
@@ -175,21 +177,28 @@ async def create_task(task: TaskCreate, user_id: str = Depends(verify_token)):
         cleaned_description = task.description.strip()
         description = cleaned_description if cleaned_description else None
 
-    # Check if the user is a member of the team
-    is_member = await db.fetchval("""
-        SELECT EXISTS (
-            SELECT 1
-            FROM team_members
-            WHERE team_id = $1
-              AND user_id = $2
-        )
-    """, task.team_id, user_id)
+    if task.team_id is not None:
+        # Check if the user is a member of the team
+        is_member = await db.fetchval("""
+            SELECT EXISTS (
+                SELECT 1
+                FROM team_members
+                WHERE team_id = $1
+                  AND user_id = $2
+            )
+        """, task.team_id, user_id)
 
-    if not is_member:
+        if not is_member:
+            await db.close()
+            raise HTTPException(
+                status_code=403,
+                detail="You are not a member of this team"
+            )
+    elif task.assigned_to is not None:
         await db.close()
         raise HTTPException(
-            status_code=403,
-            detail="You are not a member of this team"
+            status_code=400,
+            detail="Cannot assign a personal task without a team."
         )
 
     # Insert task without assigned_to
@@ -282,8 +291,11 @@ async def update_task(task_id: str, task: TaskUpdate, user_id: str = Depends(ver
         UPDATE tasks
         SET {", ".join(set_clauses)}
         WHERE id = ${task_id_idx}
-          AND team_id IN (
-              SELECT team_id FROM team_members WHERE user_id = ${user_id_idx}
+          AND (
+              created_by = ${user_id_idx}
+              OR team_id IN (
+                    SELECT team_id FROM team_members WHERE user_id = ${user_id_idx}
+              )
           )
         RETURNING *
     """
@@ -348,8 +360,11 @@ async def get_task(task_id: str, user_id: str = Depends(verify_token)):
         LEFT JOIN team_members atm ON atm.id = t.assigned_to
         LEFT JOIN users au ON au.id = atm.user_id
         WHERE t.id = $1
-          AND t.team_id IN (
-              SELECT team_id FROM team_members WHERE user_id = $2
+          AND (
+              t.created_by = $2
+              OR t.team_id IN (
+                    SELECT team_id FROM team_members WHERE user_id = $2
+              )
           )
     """, task_id, user_id)
 
@@ -371,9 +386,13 @@ async def get_task_comments(task_id: str, user_id: str = Depends(verify_token)):
         SELECT EXISTS (
             SELECT 1
             FROM tasks t
-            JOIN team_members tm ON tm.team_id = t.team_id
             WHERE t.id = $1
-              AND tm.user_id = $2
+              AND (
+                    t.created_by = $2
+                    OR t.team_id IN (
+                        SELECT team_id FROM team_members WHERE user_id = $2
+                    )
+              )
         )
     """, task_id, user_id)
 
@@ -416,9 +435,13 @@ async def create_task_comment(task_id: str, payload: CommentCreate, user_id: str
         SELECT EXISTS (
             SELECT 1
             FROM tasks t
-            JOIN team_members tm ON tm.team_id = t.team_id
             WHERE t.id = $1
-              AND tm.user_id = $2
+              AND (
+                    t.created_by = $2
+                    OR t.team_id IN (
+                        SELECT team_id FROM team_members WHERE user_id = $2
+                    )
+              )
         )
     """, task_id, user_id)
 

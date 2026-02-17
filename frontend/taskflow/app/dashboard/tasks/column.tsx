@@ -59,8 +59,9 @@ export const columns: ColumnDef<Task>[] = [
     cell: ({ row, table }) => {
       const task = row.original
       const meta = table.options.meta as TableMeta
-      const assignees = meta?.assigneesByTeam?.[task.team_id] || []
-      const assigneesLoading = meta?.assigneesLoadingByTeam?.[task.team_id] || false
+      const teamId = task.team_id || ""
+      const assignees = teamId ? (meta?.assigneesByTeam?.[teamId] || []) : []
+      const assigneesLoading = teamId ? (meta?.assigneesLoadingByTeam?.[teamId] || false) : false
 
       return (
         <DropdownMenu>
@@ -85,12 +86,14 @@ export const columns: ColumnDef<Task>[] = [
             </DropdownMenuItem>
             <DropdownMenuSub>
               <DropdownMenuSubTrigger
-                onClick={() => void meta?.onLoadAssignees?.(task.team_id)}
-                onPointerEnter={() => void meta?.onLoadAssignees?.(task.team_id)}
+                disabled={!teamId}
+                onClick={() => teamId && void meta?.onLoadAssignees?.(teamId)}
+                onPointerEnter={() => teamId && void meta?.onLoadAssignees?.(teamId)}
               >
                 Assign to
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent>
+                {!teamId && <DropdownMenuItem disabled>Personal task (no team)</DropdownMenuItem>}
                 <DropdownMenuItem
                   onClick={() =>
                     meta?.onUpdateTask?.(task.id, {
@@ -197,7 +200,7 @@ export const columns: ColumnDef<Task>[] = [
   {
     accessorKey: "team_name",
     header: "Team",
-    cell: ({ row }) => row.original.team_name || row.original.team_id,
+    cell: ({ row }) => row.original.team_name || "Personal",
   },
   {
     accessorKey: "created_by_name",

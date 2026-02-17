@@ -43,7 +43,7 @@ class Task(BaseModel):
     description: Optional[str] = None
     status: StatusLevel
     priority: PriorityLevel
-    team_id: UUID  
+    team_id: Optional[UUID] = None
     created_by: UUID  
     assigned_to: Optional[UUID] = None
     created_at: datetime

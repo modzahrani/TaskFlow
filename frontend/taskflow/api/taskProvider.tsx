@@ -11,7 +11,7 @@ export interface Task {
   description?: string | null;
   status: TaskStatus;
   priority: TaskPriority;
-  team_id: string;
+  team_id?: string | null;
   created_by: string;
   assigned_to?: string | null;
   created_at: string;

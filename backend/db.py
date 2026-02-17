@@ -11,6 +11,21 @@ async def get_db():
 async def init_db():
     db = await get_db()
     try:
+        await db.execute("""
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_name = 'tasks'
+                      AND column_name = 'team_id'
+                      AND is_nullable = 'NO'
+                ) THEN
+                    ALTER TABLE tasks ALTER COLUMN team_id DROP NOT NULL;
+                END IF;
+            END $$;
+        """)
+
         # Legacy schema fix: allow duplicate team names by removing unique
         # constraints/indexes that enforce uniqueness on teams.name.
         await db.execute("""
