@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { Mail, Lock, Eye, EyeOff } from "lucide-react"
 import { login, resendConfirmation } from "@/api/userProvider"
+import { setSessionAccessToken } from "@/api/clientProvider"
 import { useRouter } from "next/navigation"
 import axios from "axios"
 import Link from "next/link"
@@ -30,6 +31,7 @@ export default function LoginPage() {
       const response = await login({ email, password })
 
       if (response.data?.access_token) {
+        setSessionAccessToken(response.data.access_token)
         router.push("/dashboard")
       }
     } catch (err) {

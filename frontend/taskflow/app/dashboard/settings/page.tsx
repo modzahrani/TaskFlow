@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { Bell, LogOut, Moon, Plus, Save, ShieldCheck, UserMinus, UserPlus, Users } from "lucide-react"
 import { getCurrentUser, logout, updateProfile, User } from "@/api/userProvider"
+import { setSessionAccessToken } from "@/api/clientProvider"
 import { acceptInvite, addTeamMember, createTeam, declineInvite, getMyPendingInvites, getTeamMembers, getTeams, removeTeamMember, Team, TeamInvite, TeamMember, TeamRole } from "@/api/teamProvider"
 import { useRouter } from "next/navigation"
 import axios from "axios"
@@ -237,6 +238,7 @@ export default function SettingsPage() {
     } catch (error) {
       console.error("Logout API failed, continuing local logout:", error)
     } finally {
+      setSessionAccessToken(null)
       localStorage.removeItem("user")
       setLoggingOut(false)
       router.push("/login")

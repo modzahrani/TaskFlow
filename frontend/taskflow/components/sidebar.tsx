@@ -3,6 +3,7 @@ import { LayoutDashboard, CheckCircle, User, Settings, LogOut, Calendar } from '
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { logout } from '@/api/userProvider';
+import { setSessionAccessToken } from '@/api/clientProvider';
 import { useState } from 'react';
 import { BUTTON_SECONDARY } from '@/lib/buttonStyles';
 
@@ -27,6 +28,7 @@ const Sidebar = () => {
     } catch (error) {
       console.error('Logout API failed, continuing local logout:', error);
     } finally {
+      setSessionAccessToken(null);
       localStorage.removeItem('user');
       setIsLoggingOut(false);
       router.push('/login');
