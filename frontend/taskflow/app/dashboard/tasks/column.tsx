@@ -1,6 +1,6 @@
 "use client"
 
-import { Task } from "@/api/taskProvider"
+import { Task, TaskPriority, TaskStatus } from "@/api/taskProvider"
 import { ColumnDef } from "@tanstack/react-table"
 import { ArrowUpDown, MoreHorizontal } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -87,32 +87,6 @@ export const columns: ColumnDef<Task>[] = [
             >
               View comments
             </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => {
-                const newStatus =
-                  task.status === "todo"
-                    ? "in_progress"
-                    : task.status === "in_progress"
-                      ? "done"
-                      : "todo"
-                meta?.onUpdateTask?.(task.id, { status: newStatus })
-              }}
-            >
-              Change status
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => {
-                const newPriority =
-                  task.priority === "low"
-                    ? "medium"
-                    : task.priority === "medium"
-                      ? "high"
-                      : "low"
-                meta?.onUpdateTask?.(task.id, { priority: newPriority })
-              }}
-            >
-              Change priority
-            </DropdownMenuItem>
             <DropdownMenuSub>
               <DropdownMenuSubTrigger
                 onClick={() => void meta?.onLoadAssignees?.(task.team_id)}
@@ -176,6 +150,25 @@ export const columns: ColumnDef<Task>[] = [
         <ArrowUpDown className="ml-2 h-4 w-4" />
       </Button>
     ),
+    cell: ({ row, table }) => {
+      const task = row.original
+      const meta = table.options.meta as TableMeta
+      return (
+        <select
+          value={task.priority}
+          onChange={(e) =>
+            meta?.onUpdateTask?.(task.id, {
+              priority: e.target.value as TaskPriority,
+            })
+          }
+          className="rounded-md border border-border bg-background px-2 py-1 text-sm"
+        >
+          <option value="low">low</option>
+          <option value="medium">medium</option>
+          <option value="high">high</option>
+        </select>
+      )
+    },
   },
   {
     accessorKey: "status",
@@ -185,6 +178,25 @@ export const columns: ColumnDef<Task>[] = [
         <ArrowUpDown className="ml-2 h-4 w-4" />
       </Button>
     ),
+    cell: ({ row, table }) => {
+      const task = row.original
+      const meta = table.options.meta as TableMeta
+      return (
+        <select
+          value={task.status}
+          onChange={(e) =>
+            meta?.onUpdateTask?.(task.id, {
+              status: e.target.value as TaskStatus,
+            })
+          }
+          className="rounded-md border border-border bg-background px-2 py-1 text-sm"
+        >
+          <option value="todo">todo</option>
+          <option value="in_progress">in progress</option>
+          <option value="done">done</option>
+        </select>
+      )
+    },
   },
   {
     accessorKey: "team_name",
