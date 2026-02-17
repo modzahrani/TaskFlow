@@ -903,10 +903,21 @@ async def check_email_exists(email: str = Query(..., min_length=3)):
 
 @router.post("/login")
 async def login_user(user: UserLogin, response: Response):
-    auth_response = supabase.auth.sign_in_with_password({
-        "email": user.email,
-        "password": user.password
-    })
+    try:
+        auth_response = supabase.auth.sign_in_with_password({
+            "email": user.email,
+            "password": user.password
+        })
+    except Exception as e:
+        error_message = str(e).lower()
+        if "email not confirmed" in error_message:
+            raise HTTPException(
+                status_code=403,
+                detail="Email not confirmed. Please confirm your email before login."
+            )
+        if "invalid login credentials" in error_message:
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+        raise HTTPException(status_code=500, detail="Login failed")
     
     if auth_response.user is None or auth_response.session is None:
         raise HTTPException(status_code=401, detail="Invalid email or password")
